@@ -160,7 +160,12 @@ class ProfilerCorrelatorTest extends TestCase
         $contextStore->initialize();
         $contextStore->addEvent('info', 'Request completed', []);
 
-        ContextLogEmitter::emit($contextStore, 200, 'Request completed');
+        ContextLogEmitter::emit(
+            $contextStore,
+            200,
+            'Request completed',
+            new ProfilerCorrelator([]),
+        );
 
         $contents = file_get_contents($this->logFile) ?: '';
 

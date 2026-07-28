@@ -111,7 +111,7 @@ return [
 
     'console' => [
         'skip_commands' => array_filter(array_merge(
-            ['queue:work', 'queue:listen'],
+            ['queue:work', 'queue:listen', 'horizon', 'horizon:*'],
             explode(',', env('CONTEXT_LOG_SKIP_COMMANDS', '')),
         )),
     ],
@@ -161,7 +161,9 @@ return [
 
     'trace' => [
         'ignore_paths' => array_values(array_filter(array_merge(
-            ['vendor'],
+            [
+                'vendor',
+            ],
             explode(',', (string) env('CONTEXT_LOG_TRACE_IGNORE_PATHS', '')),
         ))),
     ],

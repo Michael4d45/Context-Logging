@@ -98,7 +98,7 @@ class SentryBridgeTest extends TestCase
         config([
             'context-logging.trace.ignore_paths' => [
                 'vendor',
-                '/opt/portal-extra-packages/vendor',
+                '/opt/extra-packages/vendor',
             ],
         ]);
 
@@ -110,7 +110,7 @@ class SentryBridgeTest extends TestCase
         $event->setLevel(Severity::error());
 
         $appFile = base_path('app/Billing/Actions/Fail.php');
-        $sidecar = '/opt/portal-extra-packages/vendor/michael4d45/context-logging/src/Middleware/EmitContextMiddleware.php';
+        $sidecar = '/opt/extra-packages/vendor/acme/pkg/src/Middleware/EmitContextMiddleware.php';
         $stacktrace = new Stacktrace([
             new Frame('emit', $sidecar, 41, null, $sidecar, [], false),
             new Frame('fail', $appFile, 42, null, $appFile, [], true),
@@ -121,6 +121,6 @@ class SentryBridgeTest extends TestCase
 
         $this->assertNotNull($payload);
         $this->assertContains('app/Billing/Actions/Fail.php:42', $payload['trace']);
-        $this->assertStringNotContainsString('portal-extra-packages', implode("\n", $payload['trace']));
+        $this->assertStringNotContainsString('extra-packages/vendor', implode("\n", $payload['trace']));
     }
 }

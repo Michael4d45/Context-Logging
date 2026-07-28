@@ -27,22 +27,15 @@ final class XdebugAdapter implements ProfilerAdapter
             return null;
         }
 
-        $path = null;
-        if (function_exists('xdebug_get_profiler_filename')) {
-            try {
-                $filename = xdebug_get_profiler_filename();
-                if (is_string($filename) && $filename !== '') {
-                    $path = $filename;
-                }
-            } catch (\Throwable) {
-                $path = null;
-            }
-        }
+        $path = $this->resolveProfilerPath();
 
         // Profiling mode can be enabled without a file yet (trigger not fired).
         if ($path === null && ! $this->looksActivelyProfiling()) {
             return null;
         }
+
+        $outputDir = ini_get('xdebug.output_dir');
+        $outputDir = is_string($outputDir) && $outputDir !== '' ? $outputDir : '/tmp';
 
         return new ProfileRef(
             vendor: 'xdebug',
@@ -52,8 +45,54 @@ final class XdebugAdapter implements ProfilerAdapter
             url: null,
             meta: [
                 'mode' => $this->modeString(),
+                'output_dir' => $outputDir,
             ],
         );
+    }
+
+    private function resolveProfilerPath(): ?string
+    {
+        if (function_exists('xdebug_get_profiler_filename')) {
+            try {
+                $filename = xdebug_get_profiler_filename();
+                if (is_string($filename) && $filename !== '') {
+                    return $filename;
+                }
+            } catch (\Throwable) {
+                // fall through to predicted path when this request is profiling
+            }
+        }
+
+        if ($this->looksActivelyProfiling()) {
+            return $this->predictProfilerPath();
+        }
+
+        return null;
+    }
+
+    private function predictProfilerPath(): ?string
+    {
+        $outputDir = ini_get('xdebug.output_dir');
+        $outputDir = is_string($outputDir) && $outputDir !== '' ? $outputDir : '/tmp';
+
+        $pattern = ini_get('xdebug.profiler_output_name');
+        $pattern = is_string($pattern) && $pattern !== '' ? $pattern : 'cachegrind.out.%p';
+
+        $script = $_SERVER['SCRIPT_FILENAME'] ?? $_SERVER['PHP_SELF'] ?? 'script';
+        $script = is_string($script) ? $script : 'script';
+
+        $replacements = [
+            '%p' => (string) getmypid(),
+            '%h' => (string) (gethostname() ?: 'unknown'),
+            '%r' => (string) random_int(0, 0xffff_ffff),
+            '%s' => pathinfo($script, PATHINFO_FILENAME) ?: 'script',
+            '%t' => (string) time(),
+            '%u' => str_replace('\\', '_', pathinfo($script, PATHINFO_FILENAME) ?: 'script'),
+        ];
+
+        $filename = strtr($pattern, $replacements);
+
+        return rtrim(str_replace('\\', '/', $outputDir), '/').'/'.ltrim($filename, '/');
     }
 
     private function isProfilingMode(): bool

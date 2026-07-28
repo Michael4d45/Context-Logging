@@ -19,15 +19,19 @@ class TraceHelperTest extends TestCase
         config([
             'context-logging.trace.ignore_paths' => [
                 'vendor',
-                '/opt/portal-extra-packages/vendor',
+                '/opt/extra-packages/vendor',
+                '/opt/other-extra-packages/vendor',
             ],
         ]);
 
         $this->assertTrue(
-            TraceHelper::shouldIgnoreFile('/opt/portal-extra-packages/vendor/michael4d45/context-logging/src/Middleware/EmitContextMiddleware.php')
+            TraceHelper::shouldIgnoreFile('/opt/extra-packages/vendor/acme/pkg/src/Middleware/EmitContextMiddleware.php')
+        );
+        $this->assertTrue(
+            TraceHelper::shouldIgnoreFile('/opt/other-extra-packages/vendor/acme/pkg/src/Middleware/EmitContextMiddleware.php')
         );
         $this->assertFalse(
-            TraceHelper::shouldIgnoreFile('/opt/portal-extra-packages/other/src/Thing.php')
+            TraceHelper::shouldIgnoreFile('/opt/extra-packages/other/src/Thing.php')
         );
         $this->assertTrue(TraceHelper::shouldIgnoreFile(base_path('vendor/foo/bar.php')));
     }

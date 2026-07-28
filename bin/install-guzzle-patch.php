@@ -53,8 +53,8 @@ if (! class_exists(PatchInstaller::class)) {
 $ok = (new PatchInstaller())->install(preAutoloadDump: false);
 
 if (! $ok) {
-    fwrite(STDERR, "Guzzle patch install failed.\n");
-    exit(1);
+    fwrite(STDERR, "Guzzle patch install skipped (guzzlehttp/guzzle not installed).\n");
+    exit(0);
 }
 
 fwrite(STDOUT, "Guzzle Client patch ready. Enable with CONTEXT_LOG_HTTP_GUZZLE_PATCH=true\n");

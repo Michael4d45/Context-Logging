@@ -73,6 +73,11 @@
         },
         "sort-packages": true
     },
+    "scripts": {
+        "post-autoload-dump": [
+            "@php bin/install-guzzle-patch.php"
+        ]
+    },
     "minimum-stability": "stable",
     "prefer-stable": true
 }
