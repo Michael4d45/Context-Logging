@@ -281,6 +281,40 @@ php artisan vendor:publish --provider="Michael4d45\\ContextLogging\\ContextLoggi
 
 This creates `config/context-logging.php` for future options like sampling rates, field filtering, and custom context enrichment.
 
+### PHPUnit / feature tests
+
+Non-HTTP tests do not run the request middleware, and `artisan test` is skipped from
+console-wide wrapping (so the suite is not one giant log line).
+
+To get **one wide event per test** (like Tinker per evaluation):
+
+1. Register the extension in `phpunit.xml` (starts each test lifecycle):
+
+```xml
+<extensions>
+    <bootstrap class="Michael4d45\ContextLogging\PHPUnit\ContextLoggingExtension"/>
+</extensions>
+```
+
+2. Use the `LogsTestContext` trait on your base TestCase (emits before Laravel
+   tears down the app — PHPUnit's Passed event is too late):
+
+```php
+use Michael4d45\ContextLogging\PHPUnit\LogsTestContext;
+
+abstract class TestCase extends BaseTestCase
+{
+    use LogsTestContext;
+}
+```
+
+3. Enable with `CONTEXT_LOG_PHPUNIT=true` (env, or a local flag your bootstrap reads).
+
+4. Ensure `ContextLoggingServiceProvider` is loaded in the testing environment.
+
+Opt in only when debugging — leaving this on for the whole CI suite will flood
+the log. HTTP tests that already emit via middleware are not double-logged.
+
 ### Outgoing HTTP Sub-Context Hooks
 
 You can attach outbound HTTP request/response data as a sub-context layer without wrapping every `Http::` call.

@@ -147,9 +147,36 @@ return [
 
     'console' => [
         'skip_commands' => array_filter(array_merge(
-            ['queue:work', 'queue:listen', 'horizon', 'horizon:*'],
+            [
+                'queue:work',
+                'queue:listen',
+                'horizon',
+                'horizon:*',
+                // PHPUnit owns per-test lifecycles via ContextLoggingExtension.
+                'test',
+                'test:*',
+                'phpunit',
+            ],
             explode(',', env('CONTEXT_LOG_SKIP_COMMANDS', '')),
         )),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | PHPUnit Per-Test Context
+    |--------------------------------------------------------------------------
+    |
+    | When enabled (CONTEXT_LOG_PHPUNIT=true) and ContextLoggingExtension is
+    | registered in phpunit.xml, each test gets its own wide event — same idea
+    | as Tinker emitting once per evaluation. HTTP tests that already emit via
+    | middleware are not double-logged.
+    |
+    */
+
+    'phpunit' => [
+        'enabled' => filter_var(env('CONTEXT_LOG_PHPUNIT', false), FILTER_VALIDATE_BOOL),
+        // Emit a stub wide event even when the test logged nothing.
+        'emit_empty' => filter_var(env('CONTEXT_LOG_PHPUNIT_EMIT_EMPTY', true), FILTER_VALIDATE_BOOL),
     ],
 
     /*

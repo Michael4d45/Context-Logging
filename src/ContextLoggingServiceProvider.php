@@ -315,29 +315,43 @@ class ContextLoggingServiceProvider extends ServiceProvider
             ]);
         });
 
-        Event::listen(JobProcessing::class, function (JobProcessing $event) use ($store, $trace): void {
+        // Sync jobs inside an active HTTP/phpunit/console lifecycle nest as events.
+        // Only idle queue workers own the wide event (initialize → emit → clear).
+        $nestedQueueDepth = 0;
+
+        Event::listen(JobProcessing::class, function (JobProcessing $event) use ($store, $trace, &$nestedQueueDepth): void {
             $contextStore = $store();
-            $contextStore->initialize();
-            SpxLifecycle::startIfEnabled();
-            $jobId = method_exists($event->job, 'getJobId') ? $event->job->getJobId() : null;
-            $contextStore->addContexts([
-                'job_id' => $jobId,
-                'job' => $event->job->getName(),
-                'queue' => $event->job->getQueue(),
-                'connection' => $event->connectionName,
-                'timestamp' => now()->toISOString(),
-            ]);
+
+            $nestInParent = $contextStore->hasLifecycleStarted() && ! $contextStore->hasBeenEmitted();
+
+            if ($nestInParent) {
+                $nestedQueueDepth++;
+            } else {
+                $nestedQueueDepth = 0;
+                $contextStore->initialize();
+                SpxLifecycle::startIfEnabled();
+                $jobId = method_exists($event->job, 'getJobId') ? $event->job->getJobId() : null;
+                $contextStore->addContexts([
+                    'job_id' => $jobId,
+                    'job' => $event->job->getName(),
+                    'queue' => $event->job->getQueue(),
+                    'connection' => $event->connectionName,
+                    'timestamp' => now()->toISOString(),
+                ]);
+            }
+
             $contextStore->addEvent('debug', 'queue', [
                 'event' => 'JobProcessing',
                 'job' => $event->job->getName(),
                 'queue' => $event->job->getQueue(),
                 'attempts' => $event->job->attempts(),
                 'connection' => $event->connectionName,
+                'nested' => $nestInParent,
                 'trace' => $trace(),
             ]);
         });
 
-        Event::listen(JobProcessed::class, function (JobProcessed $event) use ($store, $trace): void {
+        Event::listen(JobProcessed::class, function (JobProcessed $event) use ($store, $trace, &$nestedQueueDepth): void {
             $contextStore = $store();
             $contextStore->addEvent('debug', 'queue', [
                 'event' => 'JobProcessed',
@@ -347,11 +361,18 @@ class ContextLoggingServiceProvider extends ServiceProvider
                 'connection' => $event->connectionName,
                 'trace' => $trace(),
             ]);
+
+            if ($nestedQueueDepth > 0) {
+                $nestedQueueDepth--;
+
+                return;
+            }
+
             ContextLogEmitter::emit($contextStore, null, 'Job completed');
             $contextStore->clear();
         });
 
-        Event::listen(JobFailed::class, function (JobFailed $event) use ($store, $trace): void {
+        Event::listen(JobFailed::class, function (JobFailed $event) use ($store, $trace, &$nestedQueueDepth): void {
             $contextStore = $store();
             $contextStore->addEvent('error', 'queue', [
                 'event' => 'JobFailed',
@@ -362,6 +383,13 @@ class ContextLoggingServiceProvider extends ServiceProvider
                 'exception' => $event->exception->getMessage(),
                 'trace' => $trace(),
             ]);
+
+            if ($nestedQueueDepth > 0) {
+                $nestedQueueDepth--;
+
+                return;
+            }
+
             ContextLogEmitter::emit($contextStore, null, 'Job failed');
             $contextStore->clear();
         });
