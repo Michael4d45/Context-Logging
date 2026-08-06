@@ -42,7 +42,9 @@ final class PhpunitTestLifecycle
             return;
         }
 
-        $store->initialize();
+        // Promote buffered setUp / createApplication instrumentation into this test
+        // (PHPUnit Prepared fires after setUp; without promote those were standalone SQL lines).
+        $store->initialize(promotePreLifecycleEvents: true);
         $store->addContexts(array_filter([
             'source' => 'phpunit',
             'run_id' => (string) Str::uuid(),

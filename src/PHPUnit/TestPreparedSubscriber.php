@@ -11,6 +11,9 @@ use PHPUnit\Event\Test\PreparedSubscriber;
 /**
  * Starts a test lifecycle after setUp so the Laravel app (and ContextStore) exist.
  *
+ * setUp queries are buffered while PHPUnit logging is enabled and promoted into
+ * this lifecycle via {@see PhpunitTestLifecycle::start()}.
+ *
  * @internal
  */
 final class TestPreparedSubscriber implements PreparedSubscriber

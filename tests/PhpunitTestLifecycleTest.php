@@ -89,6 +89,44 @@ class PhpunitTestLifecycleTest extends TestCase
     }
 
     #[Test]
+    public function it_promotes_buffered_setup_events_into_the_test_wide_event(): void
+    {
+        $store = $this->app->make(ContextStore::class);
+        $store->clear();
+
+        // Simulate setUp SQL before Test\Prepared starts the lifecycle.
+        $store->addEvent('debug', 'sql', [
+            'SQL' => "select `id` from `tenants` where `slug` = 'directmeds' limit 1",
+        ]);
+        $store->addEvent('debug', 'sql', [
+            'SQL' => 'insert into `gateways` (`iso`, `label`) values (?, ?)',
+        ]);
+
+        $this->assertFalse($store->hasLifecycleStarted());
+        $this->assertNotEmpty($store->getBufferedEvents());
+
+        PhpunitTestLifecycle::start(
+            'Tests\\Flows\\UserNotLiveE2ETest::test_a_checkout',
+            'Tests\\Flows\\UserNotLiveE2ETest',
+            'test_a_checkout'
+        );
+
+        $this->assertTrue($store->hasLifecycleStarted());
+        $this->assertSame([], $store->getBufferedEvents());
+        $this->assertCount(2, $store->getEvents());
+
+        PhpunitTestLifecycle::finish(failed: true);
+
+        $contents = file_get_contents($this->logFile) ?: '';
+        $this->assertStringContainsString('Test failed', $contents);
+        $this->assertStringContainsString('tenants', $contents);
+        $this->assertStringContainsString('gateways', $contents);
+        // Must not have been standalone-emitted before the wide event.
+        $standaloneSql = preg_match_all('/^\[.*?\] testing\.DEBUG: select /m', $contents) ?: 0;
+        $this->assertSame(0, $standaloneSql);
+    }
+
+    #[Test]
     public function it_noops_when_phpunit_mode_is_disabled(): void
     {
         config()->set('context-logging.phpunit.enabled', false);

@@ -306,16 +306,22 @@ class ContextStore
 
     /**
      * Web requests buffer pre-lifecycle instrumentation so it can merge into the request-wide log.
-     * Console processes (queue, Artisan, tests) emit immediately so unrelated activity is not deferred.
+     * PHPUnit (when opted in) buffers the same way so setUp DB/seed work joins the test wide event.
+     * Other console processes (queue, Artisan) emit immediately so unrelated activity is not deferred.
      */
     protected function shouldBufferPreLifecycleEvents(): bool
     {
-        if (!function_exists('app')) {
+        if (! function_exists('app')) {
             return false;
         }
 
         try {
-            return !app()->runningInConsole();
+            if (! app()->runningInConsole()) {
+                return true;
+            }
+
+            return class_exists(\Michael4d45\ContextLogging\PHPUnit\PhpunitTestLifecycle::class)
+                && \Michael4d45\ContextLogging\PHPUnit\PhpunitTestLifecycle::enabled();
         } catch (\Throwable) {
             return false;
         }
