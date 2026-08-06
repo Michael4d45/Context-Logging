@@ -19,9 +19,12 @@ use Illuminate\Support\Str;
  */
 class RequestContextMiddleware
 {
-    public function __construct(
-        protected ContextStore $contextStore
-    ) {}
+    protected ContextStore $contextStore;
+
+    public function __construct(ContextStore $contextStore)
+    {
+        $this->contextStore = ContextStore::shared($contextStore);
+    }
 
     /**
      * Handle an incoming request.

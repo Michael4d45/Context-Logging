@@ -87,6 +87,47 @@ class ContextStore
     }
 
     /**
+     * Resolve the process-wide ContextStore, binding the first concrete instance
+     * when the service provider has not registered a singleton (e.g. middleware
+     * registered in tests without loading ContextLoggingServiceProvider).
+     *
+     * When a caller passes an explicit store that is not the container binding
+     * (typical in unit tests: `new Middleware($customStore)`), that instance is
+     * kept so tests can inject subclasses.
+     */
+    public static function shared(?self $resolved = null): self
+    {
+        if (! function_exists('app')) {
+            return $resolved ?? new self;
+        }
+
+        try {
+            $app = app();
+        } catch (\Throwable) {
+            return $resolved ?? new self;
+        }
+
+        if (! $app->bound(self::class)) {
+            $store = $resolved ?? new self(
+                $app->bound(HttpContextHookRunner::class) ? $app->make(HttpContextHookRunner::class) : null,
+                (bool) $app['config']->get('context-logging.http.enabled', true),
+            );
+
+            $app->instance(self::class, $store);
+
+            return $store;
+        }
+
+        $bound = $app->make(self::class);
+
+        if ($resolved !== null && $resolved !== $bound) {
+            return $resolved;
+        }
+
+        return $bound;
+    }
+
+    /**
      * Initialize the context store for a new request, job, or command lifecycle.
      *
      * @param  bool  $promotePreLifecycleEvents  When true (HTTP middleware), move buffered pre-lifecycle events into this lifecycle. When false, emit any queued events as standalone logs first, then start with an empty event list.

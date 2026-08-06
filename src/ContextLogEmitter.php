@@ -4,6 +4,8 @@ namespace Michael4d45\ContextLogging;
 
 use Illuminate\Log\LogManager;
 use Michael4d45\ContextLogging\Profiling\ProfilerCorrelator;
+use Monolog\Formatter\JsonFormatter;
+use Monolog\Handler\StreamHandler;
 
 /**
  * Emits the context store payload to the log.
@@ -55,8 +57,7 @@ class ContextLogEmitter
 
         $contextStore->markEmitted();
 
-        $originalLogManager = new LogManager(app());
-        $originalLogManager->log($highestLevel, $message, $payload);
+        self::writeToLaravelLog($highestLevel, $message, $payload);
     }
 
     /**
@@ -101,12 +102,58 @@ class ContextLogEmitter
             'events' => [$event],
         ];
 
-        $originalLogManager = new LogManager(app());
-        $originalLogManager->log(
+        self::writeToLaravelLog(
             $event['level'],
             self::standaloneLogMessage($event),
             $payload,
         );
+    }
+
+    /**
+     * Write through a fresh LogManager so ContextualLogger is not re-entered.
+     *
+     * Ensures the common `json` wide-event channel exists when referenced by
+     * LOG_STACK / LOG_CHANNEL (e.g. Docker/dev setups) even if the app did not
+     * register it. Logging failures never propagate into the request lifecycle.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private static function writeToLaravelLog(string $level, string $message, array $payload): void
+    {
+        try {
+            self::ensureJsonLogChannel();
+
+            (new LogManager(app()))->log($level, $message, $payload);
+        } catch (\Throwable) {
+            // Logging must never break HTTP / console / job completion.
+        }
+    }
+
+    /**
+     * Register a JSON Monolog channel when missing so stack/default configs that
+     * reference `json` (common with log:monitor) keep working.
+     */
+    public static function ensureJsonLogChannel(): void
+    {
+        if (! function_exists('config') || config('logging.channels.json') !== null) {
+            return;
+        }
+
+        $path = function_exists('storage_path')
+            ? storage_path('logs/laravel.log')
+            : (sys_get_temp_dir().DIRECTORY_SEPARATOR.'laravel.log');
+
+        config([
+            'logging.channels.json' => [
+                'driver' => 'monolog',
+                'level' => env('LOG_LEVEL', 'debug'),
+                'handler' => StreamHandler::class,
+                'formatter' => JsonFormatter::class,
+                'with' => [
+                    'stream' => $path,
+                ],
+            ],
+        ]);
     }
 
     /**

@@ -41,6 +41,8 @@ class ContextLoggingServiceProvider extends ServiceProvider
             'context-logging'
         );
 
+        $this->registerJsonLogChannel();
+
         $this->app->singleton(HttpContextHookRunner::class, function ($app) {
             return new HttpContextHookRunner();
         });
@@ -164,6 +166,15 @@ class ContextLoggingServiceProvider extends ServiceProvider
         if (class_exists(\Michael4d45\ContextLogging\Log::class)) {
             \Michael4d45\ContextLogging\Log::clearResolvedInstance('log');
         }
+    }
+
+    /**
+     * Ensure a JSON Monolog channel exists for wide-event output (log:monitor).
+     * Apps may already define it; Docker/dev often sets LOG_STACK=json.
+     */
+    protected function registerJsonLogChannel(): void
+    {
+        ContextLogEmitter::ensureJsonLogChannel();
     }
 
     protected function bootSentryBridge(): void
