@@ -343,6 +343,27 @@ Set `capture_body` to `true` when you need request/response body capture.
 When body capture is enabled, configured `redact_body_fields` are masked recursively for JSON payloads.
 Captured requests also include `path` and `query_params`, and configured `redact_query_params` are masked.
 
+### Database / SQL logging
+
+Enable SQL event logging with `CONTEXT_LOG_DB=true` (`log.db`). Each query is recorded with raw SQL, execution time, and a collapsed call-site trace.
+
+Result capture is **opt-in and off by default** (`CONTEXT_LOG_DB_CAPTURE_RESULTS=false`). When off, behavior is unchanged: a thin `DB::listen` listener only — no Connection wrapping.
+
+When `capture_results` is on, the package installs capturing driver subclasses via `Connection::resolverFor` (same idea as the Guzzle Client wrap) so SELECT rows and write `affected_rows` can be attached to sql events:
+
+```php
+'database' => [
+  'capture_results' => false,
+  'max_rows' => 20,
+  'max_column_length' => 500,
+  'max_payload_bytes' => 65536,
+  'redact_fields' => ['password', 'token', 'secret', 'access_token', 'api_key', 'remember_token'],
+  'redact_value' => '[redacted]',
+],
+```
+
+Captured row payloads are truncated and redacted; cursor queries are skipped (not materialized). Intended for local development — leave capture off in shared/production environments.
+
 #### Optional Manual Control
 
 `ContextStore` provides three methods:

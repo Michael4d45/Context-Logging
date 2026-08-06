@@ -52,4 +52,22 @@ class TraceHelperTest extends TestCase
             TraceHelper::shouldIgnoreFile(base_path('extra-packages/src/Thing.php'))
         );
     }
+
+    public function test_collapsed_trace_falls_back_to_vendor_frames_when_app_stack_is_empty(): void
+    {
+        config([
+            'context-logging.trace.ignore_paths' => ['vendor'],
+        ]);
+
+        $lines = TraceHelper::getCollapsedTrace();
+
+        // This test file lives under the package (ignored as ContextLogging / vendor
+        // depending on install). The fallback must still return at least one frame
+        // so framework-only call sites are not opaque in the explorer.
+        $this->assertNotEmpty($lines);
+        foreach ($lines as $line) {
+            $this->assertMatchesRegularExpression('/\.php:\d+$/', $line);
+            $this->assertStringNotContainsString('TraceHelper.php', $line);
+        }
+    }
 }

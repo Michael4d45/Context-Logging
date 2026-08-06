@@ -3,6 +3,7 @@
 namespace Michael4d45\ContextLogging\Tests;
 
 use Michael4d45\ContextLogging\ContextStore;
+use Michael4d45\ContextLogging\Tinker\ContextLoggingTinkerShell;
 use Michael4d45\ContextLogging\Tinker\TinkerExecutionListener;
 use PHPUnit\Framework\Attributes\Test;
 use Psy\Configuration;
@@ -61,5 +62,70 @@ class TinkerExecutionListenerTest extends TestCase
         $this->assertFalse($contextStore->hasLifecycleStarted());
         $this->assertSame([], $contextStore->getAllContext());
         $this->assertStringContainsString('Tinker execution completed', file_get_contents($this->logFile) ?: '');
+    }
+
+    #[Test]
+    public function it_emits_failed_when_last_exec_was_unsuccessful(): void
+    {
+        if (! class_exists(Shell::class)) {
+            $this->markTestSkipped('PsySH is not installed.');
+        }
+
+        $config = new Configuration();
+        $config->setUsePcntl(false);
+
+        $shell = new class($config) extends Shell
+        {
+            public function getLastExecSuccess(): bool
+            {
+                return false;
+            }
+        };
+
+        $contextStore = $this->app->make(ContextStore::class);
+        $listener = new TinkerExecutionListener($contextStore);
+
+        $listener->onExecute($shell, 'throw new Exception("boom");');
+        $contextStore->addEvent('error', 'tinker', [
+            'event' => 'ExecutionFailed',
+            'exception' => 'boom',
+            'exception_class' => \Exception::class,
+        ]);
+
+        $listener->afterLoop($shell);
+
+        $log = file_get_contents($this->logFile) ?: '';
+        $this->assertStringContainsString('Tinker execution failed', $log);
+        $this->assertStringContainsString('boom', $log);
+    }
+
+    #[Test]
+    public function it_records_exceptions_on_the_active_tinker_lifecycle(): void
+    {
+        if (! class_exists(Shell::class)) {
+            $this->markTestSkipped('PsySH is not installed.');
+        }
+
+        $config = new Configuration();
+        $config->setUsePcntl(false);
+
+        $contextStore = $this->app->make(ContextStore::class);
+        $shell = new ContextLoggingTinkerShell($contextStore, $config);
+
+        $contextStore->initialize();
+        $contextStore->addContexts([
+            'command' => 'tinker',
+            'source' => 'tinker',
+            'mode' => 'interactive',
+            'input' => '1/0',
+        ]);
+
+        $shell->recordCaughtException(new \RuntimeException('tinker boom'));
+
+        $payload = $contextStore->getPayload();
+        $this->assertNotEmpty($payload['events']);
+        $this->assertSame('error', $payload['events'][0]['level']);
+        $this->assertSame('tinker boom', $payload['events'][0]['context']['exception']);
+        $this->assertSame(\RuntimeException::class, $payload['events'][0]['context']['exception_class']);
     }
 }

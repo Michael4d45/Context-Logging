@@ -7,17 +7,16 @@ use Illuminate\Cache\Events\CacheMissed;
 use Illuminate\Cache\Events\KeyForgotten;
 use Illuminate\Cache\Events\KeyWritten;
 use Illuminate\Console\Events\CommandStarting;
-use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\Events\JobQueued;
 use Illuminate\Queue\Events\QueueBusy;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Laravel\Tinker\Console\TinkerCommand;
+use Michael4d45\ContextLogging\Database\DatabaseInstrumentation;
 use Michael4d45\ContextLogging\Profiling\SpxLifecycle;
 use Michael4d45\ContextLogging\Sentry\SentryBridge;
 use Michael4d45\ContextLogging\Support\TraceHelper;
@@ -60,6 +59,12 @@ class ContextLoggingServiceProvider extends ServiceProvider
             );
         });
 
+        $this->app->singleton(DatabaseInstrumentation::class, function ($app) {
+            return new DatabaseInstrumentation(
+                $app->make(ContextStore::class),
+            );
+        });
+
         $this->app->singleton(SentryBridge::class, function ($app) {
             return new SentryBridge(
                 $app->make(ContextStore::class),
@@ -98,6 +103,10 @@ class ContextLoggingServiceProvider extends ServiceProvider
         // extend runs. The Facade caches that root forever, so Illuminate\Log
         // calls would bypass ContextualLogger and write plain Monolog lines.
         $this->forgetCachedLogFacade();
+
+        // Install capturing Connection resolvers before any provider boot() can
+        // open a stock connection (otherwise result capture never attaches).
+        $this->app->make(DatabaseInstrumentation::class)->register(resolversOnly: true);
     }
 
     /**
@@ -177,7 +186,8 @@ class ContextLoggingServiceProvider extends ServiceProvider
 
     /**
      * Re-apply the Guzzle Client classmap patch when configured but missing
-     * (e.g. after composer dump-autoload). Affects subsequent PHP processes.
+     * (e.g. after composer dump-autoload), or when Generated/UnpatchedClient
+     * no longer matches the app's guzzlehttp/guzzle Client.php.
      */
     protected function ensureGuzzlePatchInstalled(): void
     {
@@ -185,12 +195,23 @@ class ContextLoggingServiceProvider extends ServiceProvider
             return;
         }
 
-        if (\Michael4d45\ContextLogging\Guzzle\ClientPatch::isClientPatched()) {
+        $installer = new \Michael4d45\ContextLogging\Guzzle\PatchInstaller;
+
+        $patched = \Michael4d45\ContextLogging\Guzzle\ClientPatch::isClientPatched();
+        $stale = false;
+
+        try {
+            $stale = $installer->isGeneratedStale();
+        } catch (\Throwable) {
+            $stale = true;
+        }
+
+        if ($patched && ! $stale) {
             return;
         }
 
         try {
-            (new \Michael4d45\ContextLogging\Guzzle\PatchInstaller())->install(preAutoloadDump: false);
+            $installer->install(preAutoloadDump: false);
         } catch (\Throwable $e) {
             if (function_exists('logger')) {
                 try {
@@ -204,17 +225,7 @@ class ContextLoggingServiceProvider extends ServiceProvider
 
     protected function bootDatabaseLogging(): void
     {
-        if (!config('context-logging.log.db', false)) {
-            return;
-        }
-
-        DB::listen(function (QueryExecuted $query): void {
-            $this->app->make(ContextStore::class)->addEvent('debug', 'sql', [
-                'SQL' => $query->toRawSql() . ';',
-                'execution_time' => $query->time . 'ms',
-                'trace' => TraceHelper::getCollapsedTrace(),
-            ]);
-        });
+        $this->app->make(DatabaseInstrumentation::class)->register();
     }
 
     protected function bootCacheLogging(): void

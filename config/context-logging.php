@@ -98,6 +98,42 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Database / SQL Result Capture
+    |--------------------------------------------------------------------------
+    |
+    | When log.db is true, SQL text + timing are logged via DB::listen.
+    | Result capture is opt-in and off by default: when false, no Connection
+    | wrapping occurs (zero effect beyond the listen listener).
+    |
+    | When capture_results is true, Connection::resolverFor installs thin
+    | capturing driver subclasses (same idea as the Guzzle Client wrap) so
+    | SELECT rows / affected_rows can be attached to sql events.
+    |
+    */
+
+    'database' => [
+        'capture_results' => env('CONTEXT_LOG_DB_CAPTURE_RESULTS', false),
+
+        'max_rows' => (int) env('CONTEXT_LOG_DB_MAX_ROWS', 20),
+        'max_column_length' => (int) env('CONTEXT_LOG_DB_MAX_COLUMN_LENGTH', 500),
+        'max_payload_bytes' => (int) env('CONTEXT_LOG_DB_MAX_PAYLOAD_BYTES', 65536),
+
+        'redact_fields' => [
+            'password',
+            'token',
+            'secret',
+            'access_token',
+            'refresh_token',
+            'api_key',
+            'client_secret',
+            'remember_token',
+        ],
+
+        'redact_value' => env('CONTEXT_LOG_DB_REDACT_VALUE', '[redacted]'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Console Command Context
     |--------------------------------------------------------------------------
     |

@@ -101,8 +101,78 @@ PHP;
         return true;
     }
 
+    /**
+     * Whether Generated/UnpatchedClient.php is out of date vs the active Guzzle Client.php.
+     *
+     * Sidecar installs often generate against a transitive guzzle in extra-packages
+     * while the app autoloads a different guzzle (e.g. Multiplexing::NONE mismatch).
+     */
+    public function isGeneratedStale(): bool
+    {
+        $guzzleClientPath = $this->findGuzzleClientPath();
+        $packageRoot = dirname(__DIR__, 2);
+        $generatedPath = $packageRoot.'/src/Guzzle/Generated/UnpatchedClient.php';
+
+        if ($guzzleClientPath === null || ! is_file($guzzleClientPath) || ! is_file($generatedPath)) {
+            return true;
+        }
+
+        $original = file_get_contents($guzzleClientPath);
+        $actual = file_get_contents($generatedPath);
+
+        if ($original === false || $actual === false) {
+            return true;
+        }
+
+        $expected = preg_replace(
+            '/\bclass\s+Client\b/',
+            'class UnpatchedClient',
+            $original,
+            1,
+            $count
+        );
+
+        if ($count !== 1 || ! is_string($expected)) {
+            return true;
+        }
+
+        $expected = str_replace('@final', '@internal context-logging unpatched', $expected);
+
+        return hash('sha256', str_replace("\r\n", "\n", $expected))
+            !== hash('sha256', str_replace("\r\n", "\n", $actual));
+    }
+
     protected function findGuzzleClientPath(): ?string
     {
+        $fromEnv = getenv('CONTEXT_LOGGING_GUZZLE_CLIENT') ?: ($_ENV['CONTEXT_LOGGING_GUZZLE_CLIENT'] ?? null);
+        if (is_string($fromEnv) && $fromEnv !== '' && is_file($fromEnv)) {
+            return $fromEnv;
+        }
+
+        // Prefer the Guzzle package already on the autoload path (app vendor), not a
+        // transitive copy under an extra-packages sidecar that may differ.
+        if (class_exists(\GuzzleHttp\Multiplexing::class, true)) {
+            try {
+                $multiplexingFile = (new \ReflectionClass(\GuzzleHttp\Multiplexing::class))->getFileName();
+                if (is_string($multiplexingFile) && $multiplexingFile !== '') {
+                    $candidate = dirname($multiplexingFile).'/Client.php';
+                    if (is_file($candidate)) {
+                        return $candidate;
+                    }
+                }
+            } catch (\Throwable) {
+                // Fall through.
+            }
+        }
+
+        $appRoot = getenv('APP_ROOT') ?: ($_ENV['APP_ROOT'] ?? null);
+        if (is_string($appRoot) && $appRoot !== '') {
+            $candidate = rtrim($appRoot, '/\\').'/vendor/guzzlehttp/guzzle/src/Client.php';
+            if (is_file($candidate)) {
+                return $candidate;
+            }
+        }
+
         if (class_exists(InstalledVersions::class)) {
             try {
                 $installPath = InstalledVersions::getInstallPath('guzzlehttp/guzzle');

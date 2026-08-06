@@ -14,8 +14,24 @@ final class TraceHelper
     public static function getCollapsedTrace(): array
     {
         $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
-        $basePath = self::basePath();
+        $lines = self::collectFrames($trace, ignoreConfigured: true);
 
+        // Vendor-only call sites (queue fail storage, framework listeners, etc.)
+        // otherwise leave an empty stack and the explorer can't show "from where".
+        if ($lines === []) {
+            $lines = self::collectFrames($trace, ignoreConfigured: false, limit: 8);
+        }
+
+        return $lines;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $trace
+     * @return list<string>
+     */
+    private static function collectFrames(array $trace, bool $ignoreConfigured, int $limit = 0): array
+    {
+        $basePath = self::basePath();
         $lines = [];
 
         foreach ($trace as $frame) {
@@ -26,13 +42,17 @@ final class TraceHelper
                 continue;
             }
 
+            if (! str_ends_with($file, '.php')) {
+                continue;
+            }
+
             if (str_contains($file, 'storage/framework/views')) {
                 $original = self::originalBladeFromCompiled($file);
                 $file = $original ?? $file;
                 $line = $original !== null ? 0 : $line;
             }
 
-            if (self::shouldIgnoreFile($file)) {
+            if ($ignoreConfigured && self::shouldIgnoreFile($file)) {
                 continue;
             }
 
@@ -70,6 +90,10 @@ final class TraceHelper
             }
 
             $lines[] = "{$relativeFile}:{$line}";
+
+            if ($limit > 0 && count($lines) >= $limit) {
+                break;
+            }
         }
 
         return $lines;

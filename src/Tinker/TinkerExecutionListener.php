@@ -26,6 +26,15 @@ class TinkerExecutionListener extends AbstractListener
             return null;
         }
 
+        // --execute pre-initializes the store; keep that mode/input across the
+        // Shell::execute() onExecute hook instead of rewriting as interactive.
+        $preserveExecute = $this->contextStore->hasLifecycleStarted()
+            && $this->contextStore->getContext('source') === 'tinker'
+            && $this->contextStore->getContext('mode') === 'execute'
+            && ! $this->executionActive;
+
+        $executeInput = $preserveExecute ? $this->contextStore->getContext('input') : null;
+
         $this->executionActive = true;
         $this->contextStore->initialize();
         $this->contextStore->addContexts([
@@ -33,8 +42,8 @@ class TinkerExecutionListener extends AbstractListener
             'timestamp' => now()->toISOString(),
             'command' => 'tinker',
             'source' => 'tinker',
-            'mode' => 'interactive',
-            'input' => $code,
+            'mode' => $preserveExecute ? 'execute' : 'interactive',
+            'input' => is_string($executeInput) && $executeInput !== '' ? $executeInput : $code,
         ]);
 
         return null;
@@ -46,7 +55,20 @@ class TinkerExecutionListener extends AbstractListener
             return;
         }
 
-        ContextLogEmitter::emit($this->contextStore, null, 'Tinker execution completed');
+        $failed = ! $shell->getLastExecSuccess();
+        $message = $failed ? 'Tinker execution failed' : 'Tinker execution completed';
+
+        // Ensure a wide event always lands for evaluated input (even when the
+        // statement produced no Log::* calls and did not throw).
+        if (! $this->contextStore->hasEvents()) {
+            $this->contextStore->addEvent(
+                $failed ? 'error' : 'info',
+                'tinker',
+                ['event' => $failed ? 'ExecutionFailed' : 'ExecutionCompleted'],
+            );
+        }
+
+        ContextLogEmitter::emit($this->contextStore, null, $message);
         $this->contextStore->clear();
         $this->executionActive = false;
     }

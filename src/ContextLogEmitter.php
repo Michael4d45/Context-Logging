@@ -102,7 +102,60 @@ class ContextLogEmitter
         ];
 
         $originalLogManager = new LogManager(app());
-        $originalLogManager->log($event['level'], $event['message'], $payload);
+        $originalLogManager->log(
+            $event['level'],
+            self::standaloneLogMessage($event),
+            $payload,
+        );
+    }
+
+    /**
+     * Prefer a human-readable outer message for idle/console instrumentation so
+     * explorers are not stuck with opaque titles like "sql" or "Error".
+     *
+     * @param  array{level: string, message: string, context: array, timestamp: float}  $event
+     */
+    private static function standaloneLogMessage(array $event): string
+    {
+        $message = (string) ($event['message'] ?? 'log');
+        $context = is_array($event['context'] ?? null) ? $event['context'] : [];
+
+        if ($message === 'sql') {
+            $sql = (string) ($context['SQL'] ?? $context['sql'] ?? $context['query'] ?? '');
+            if ($sql !== '') {
+                return self::truncateOneLine($sql, 96);
+            }
+        }
+
+        $detail = $context['message'] ?? null;
+        if (
+            is_string($detail)
+            && $detail !== ''
+            && in_array(strtolower($message), ['error', 'exception', 'log'], true)
+        ) {
+            $prefix = $context['exception'] ?? null;
+            if (is_string($prefix) && $prefix !== '' && $prefix !== $detail) {
+                $short = str_contains($prefix, '\\')
+                    ? substr($prefix, (int) strrpos($prefix, '\\') + 1)
+                    : $prefix;
+
+                return self::truncateOneLine("{$short}: {$detail}", 96);
+            }
+
+            return self::truncateOneLine($detail, 96);
+        }
+
+        return $message;
+    }
+
+    private static function truncateOneLine(string $text, int $max): string
+    {
+        $text = preg_replace('/\s+/', ' ', trim($text)) ?? trim($text);
+        if (mb_strlen($text) <= $max) {
+            return $text;
+        }
+
+        return mb_substr($text, 0, $max).'…';
     }
 
     /**

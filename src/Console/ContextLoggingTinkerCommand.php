@@ -32,6 +32,11 @@ class ContextLoggingTinkerCommand extends TinkerCommand
             $config->setRawOutput(true);
         }
 
+        // PsySH's ProcessForker breaks Laravel's logger after pcntl_fork, so
+        // interactive wide-events never reach laravel.log. Prefer a single
+        // process so ContextLogEmitter can write reliably.
+        $config->setUsePcntl(false);
+
         $contextStore = $this->getLaravel()->make(ContextStore::class);
 
         $shell = new ContextLoggingTinkerShell($contextStore, $config);
@@ -64,10 +69,7 @@ class ContextLoggingTinkerCommand extends TinkerCommand
                 $shell->execute($code, true);
                 ContextLogEmitter::emit($contextStore, null, 'Tinker execution completed');
             } catch (Throwable $e) {
-                $contextStore->addEvent('error', 'tinker', [
-                    'event' => 'ExecutionFailed',
-                    'exception' => $e->getMessage(),
-                ]);
+                $shell->recordCaughtException($e);
                 ContextLogEmitter::emit($contextStore, null, 'Tinker execution failed');
                 $shell->writeException($e);
 
