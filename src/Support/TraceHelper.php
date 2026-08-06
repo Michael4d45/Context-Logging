@@ -26,6 +26,36 @@ final class TraceHelper
     }
 
     /**
+     * Collapse a Throwable's own stack frames (throw site), not the capture site.
+     *
+     * @return list<string>
+     */
+    public static function getCollapsedExceptionTrace(\Throwable $e): array
+    {
+        /** @var list<array<string, mixed>> $trace */
+        $trace = $e->getTrace();
+        $lines = self::collectFrames($trace, ignoreConfigured: true);
+
+        if ($lines === []) {
+            $lines = self::collectFrames($trace, ignoreConfigured: false, limit: 8);
+        }
+
+        return $lines;
+    }
+
+    public static function relativePath(string $file): string
+    {
+        $file = str_replace('\\', '/', $file);
+        $basePath = self::basePath();
+
+        if ($basePath !== '' && str_starts_with($file, $basePath.'/')) {
+            return substr($file, strlen($basePath) + 1);
+        }
+
+        return $file;
+    }
+
+    /**
      * @param  list<array<string, mixed>>  $trace
      * @return list<string>
      */

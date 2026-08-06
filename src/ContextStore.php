@@ -77,6 +77,13 @@ class ContextStore
      */
     protected bool $emissionSuppressed = false;
 
+    /**
+     * Fingerprints of exceptions already recorded this lifecycle (dedupe).
+     *
+     * @var array<string, true>
+     */
+    protected array $capturedExceptionFingerprints = [];
+
     public function __construct(
         protected ?HttpContextHookRunner $httpHookRunner = null,
         ?bool $httpEnabled = null,
@@ -147,6 +154,7 @@ class ContextStore
         $this->context = [];
         $this->httpCalls = [];
         $this->profileMarkerSequence = 0;
+        $this->capturedExceptionFingerprints = [];
         $this->startTime = microtime(true);
         $this->lifecycleStarted = true;
         $this->emitted = false;
@@ -191,6 +199,75 @@ class ContextStore
     public function getAllContext(): array
     {
         return $this->context;
+    }
+
+    /**
+     * Record a Throwable as an error event (deduped per lifecycle).
+     *
+     * @return bool True when a new event was added
+     */
+    public function addException(\Throwable $e, string $level = 'error'): bool
+    {
+        $fingerprint = md5($e::class.'|'.$e->getMessage().'|'.$e->getFile().'|'.$e->getLine());
+        if (isset($this->capturedExceptionFingerprints[$fingerprint])) {
+            return false;
+        }
+        $this->capturedExceptionFingerprints[$fingerprint] = true;
+
+        $root = $e;
+        while ($root->getPrevious() instanceof \Throwable) {
+            $root = $root->getPrevious();
+        }
+
+        $display = $e->getMessage() !== '' ? $e->getMessage() : $e::class;
+        if ($root !== $e && $root->getMessage() !== '') {
+            // Prefer the underlying cause (e.g. RouteNotFound inside ViewException).
+            $display = $root->getMessage();
+        }
+
+        $context = [
+            'exception' => $e::class,
+            'message' => $e->getMessage(),
+            'file' => TraceHelper::relativePath($e->getFile()),
+            'line' => $e->getLine(),
+        ];
+
+        if ($root !== $e) {
+            $context['previous'] = [
+                'exception' => $root::class,
+                'message' => $root->getMessage(),
+                'file' => TraceHelper::relativePath($root->getFile()),
+                'line' => $root->getLine(),
+            ];
+        }
+
+        if ((bool) config('context-logging.profiling.log_traces', true)) {
+            $context['trace'] = TraceHelper::getCollapsedExceptionTrace($e);
+        }
+
+        $this->addEvent($level, $display, $context);
+
+        return true;
+    }
+
+    /**
+     * Whether this lifecycle already has an error/critical/alert/emergency event.
+     */
+    public function hasErrorEvents(): bool
+    {
+        foreach ($this->events as $event) {
+            if (in_array($event['level'] ?? '', ['error', 'critical', 'alert', 'emergency'], true)) {
+                return true;
+            }
+        }
+
+        foreach ($this->preLifecycleQueue as $event) {
+            if (in_array($event['level'] ?? '', ['error', 'critical', 'alert', 'emergency'], true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -402,6 +479,7 @@ class ContextStore
         $this->preLifecycleQueue = [];
         $this->httpCalls = [];
         $this->profileMarkerSequence = 0;
+        $this->capturedExceptionFingerprints = [];
         $this->startTime = null;
         $this->lifecycleStarted = false;
         $this->emitted = false;

@@ -146,6 +146,7 @@ class ContextLoggingServiceProvider extends ServiceProvider
         $this->bootBroadcastingLogging();
         $this->bootSentryBridge();
         $this->bootTelegramBridge();
+        $this->bootExceptionCapture();
 
         // Clear again after all providers have registered/booted; a later
         // provider may have resolved Log between our register() and boot().
@@ -155,6 +156,29 @@ class ContextLoggingServiceProvider extends ServiceProvider
         // Note: Middleware registration is intentionally NOT automatic.
         // Users must manually register RequestContextMiddleware and EmitContextMiddleware
         // in their bootstrap/app.php file to have explicit control over middleware ordering.
+    }
+
+    /**
+     * Capture reportable exceptions into the active context wide event.
+     */
+    protected function bootExceptionCapture(): void
+    {
+        $this->callAfterResolving(
+            \Illuminate\Contracts\Debug\ExceptionHandler::class,
+            function ($handler): void {
+                if (! is_object($handler) || ! method_exists($handler, 'reportable')) {
+                    return;
+                }
+
+                $handler->reportable(function (\Throwable $e): void {
+                    try {
+                        $this->app->make(ContextStore::class)->addException($e);
+                    } catch (\Throwable) {
+                        // Never break exception reporting.
+                    }
+                });
+            }
+        );
     }
 
     protected function forgetCachedLogFacade(): void

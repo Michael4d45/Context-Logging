@@ -77,6 +77,16 @@ class ContextualLogger extends LogManager
     public function log($level, $message, array $context = []): void
     {
         $level = (string) $level;
+
+        // Laravel's ExceptionHandler logs with context['exception'] => Throwable.
+        // Record a structured exception event (deduped) instead of a raw log row
+        // that may stringify poorly or omit class/file/line.
+        if (isset($context['exception']) && $context['exception'] instanceof \Throwable) {
+            $this->contextStore->addException($context['exception'], $level);
+
+            return;
+        }
+
         $context = $this->maybeAttachTrace($level, $context);
 
         // Only accumulate in context store for wide event (no pass-through)
