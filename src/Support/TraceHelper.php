@@ -94,7 +94,9 @@ final class TraceHelper
                 continue;
             }
 
-            if (str_contains($file, 'ContextLogging') || str_contains($file, 'ServiceProvider')) {
+            // Skip this package's own frames. Do not drop app/vendor ServiceProviders —
+            // boot-time SQL (settings, config) is often fired from those classes.
+            if (str_contains($file, 'ContextLogging')) {
                 continue;
             }
 

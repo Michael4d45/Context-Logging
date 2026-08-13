@@ -91,14 +91,16 @@ class ContextLogEmitter
      * Emit a single event immediately when no request/job/command lifecycle is active.
      *
      * Used so cache, SQL, etc. are logged as they happen instead of accumulating
-     * until the next lifecycle (e.g. queue worker idle polling).
+     * until the next lifecycle (e.g. queue worker idle polling). Outer context
+     * identifies the process and call site so explorers are not left with a
+     * parentless query.
      *
      * @param  array{level: string, message: string, context: array, timestamp: float}  $event
      */
     public static function emitStandaloneEvent(array $event): void
     {
         $payload = [
-            'context' => [],
+            'context' => self::standaloneParentContext($event),
             'events' => [$event],
         ];
 
@@ -154,6 +156,76 @@ class ContextLogEmitter
                 ],
             ],
         ]);
+    }
+
+    /**
+     * Parent context for instrumentation that ran outside a request/job/command.
+     *
+     * @param  array{level: string, message: string, context: array, timestamp: float}  $event
+     * @return array<string, mixed>
+     */
+    private static function standaloneParentContext(array $event): array
+    {
+        $eventContext = is_array($event['context'] ?? null) ? $event['context'] : [];
+        $trace = is_array($eventContext['trace'] ?? null) ? $eventContext['trace'] : [];
+        $caller = null;
+        foreach ($trace as $frame) {
+            if (is_string($frame) && $frame !== '') {
+                $caller = $frame;
+                break;
+            }
+        }
+
+        $parent = [
+            'source' => 'idle',
+        ];
+
+        $command = self::currentConsoleCommand();
+        if ($command !== null) {
+            $parent['command'] = $command;
+        }
+
+        if ($caller !== null) {
+            $parent['caller'] = $caller;
+        }
+
+        return $parent;
+    }
+
+    /**
+     * Artisan command / script currently running, when this is a console process.
+     */
+    private static function currentConsoleCommand(): ?string
+    {
+        try {
+            if (function_exists('app') && ! app()->runningInConsole()) {
+                return null;
+            }
+        } catch (\Throwable) {
+            // argv may still identify the process.
+        }
+
+        $argv = $_SERVER['argv'] ?? null;
+        if (! is_array($argv) || $argv === []) {
+            return null;
+        }
+
+        foreach (array_slice($argv, 1) as $arg) {
+            if (! is_string($arg) || $arg === '' || str_starts_with($arg, '-')) {
+                continue;
+            }
+
+            $base = basename($arg);
+            if (in_array($base, ['artisan', 'php'], true)) {
+                continue;
+            }
+
+            return $arg;
+        }
+
+        $script = $argv[0] ?? null;
+
+        return is_string($script) && $script !== '' ? basename($script) : null;
     }
 
     /**

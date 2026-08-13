@@ -70,4 +70,11 @@ class TraceHelperTest extends TestCase
             $this->assertStringNotContainsString('TraceHelper.php', $line);
         }
     }
+
+    public function test_app_service_provider_frames_are_not_ignored(): void
+    {
+        $this->assertFalse(
+            TraceHelper::shouldIgnoreFile(base_path('app/Providers/AppServiceProvider.php'))
+        );
+    }
 }

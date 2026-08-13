@@ -150,4 +150,83 @@ class ContextLogEmitterTest extends TestCase
 
         $this->assertTrue($contextStore->hasBeenEmitted());
     }
+
+    #[Test]
+    public function it_wraps_standalone_sql_in_idle_parent_context(): void
+    {
+        $previousArgv = $_SERVER['argv'] ?? null;
+        $_SERVER['argv'] = ['artisan', 'queue:work', '--sleep=3'];
+
+        try {
+            ContextLogEmitter::emitStandaloneEvent([
+                'level' => 'debug',
+                'message' => 'sql',
+                'context' => [
+                    'SQL' => "select `name`, `payload` from `settings` where `group` = 'backend_features';",
+                    'execution_time' => '1.2ms',
+                    'trace' => [
+                        'app/Providers/AppServiceProvider.php:42',
+                        'vendor/spatie/laravel-settings/src/SettingsRepositories/DatabaseSettingsRepository.php:88',
+                    ],
+                ],
+                'timestamp' => microtime(true),
+            ]);
+        } finally {
+            if ($previousArgv === null) {
+                unset($_SERVER['argv']);
+            } else {
+                $_SERVER['argv'] = $previousArgv;
+            }
+        }
+
+        $payload = $this->lastLogContextPayload();
+
+        $this->assertSame('idle', $payload['context']['source'] ?? null);
+        $this->assertSame('queue:work', $payload['context']['command'] ?? null);
+        $this->assertSame('app/Providers/AppServiceProvider.php:42', $payload['context']['caller'] ?? null);
+        $this->assertCount(1, $payload['events'] ?? []);
+        $this->assertSame('sql', $payload['events'][0]['message'] ?? null);
+        $this->assertStringContainsString(
+            'select `name`, `payload` from `settings`',
+            file_get_contents($this->logFile) ?: '',
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function lastLogContextPayload(): array
+    {
+        $contents = file_get_contents($this->logFile) ?: '';
+        $this->assertNotSame('', $contents);
+
+        $start = strpos($contents, '{');
+        $this->assertNotFalse($start, $contents);
+
+        $depth = 0;
+        $end = null;
+        $length = strlen($contents);
+        for ($i = $start; $i < $length; $i++) {
+            $char = $contents[$i];
+            if ($char === '{') {
+                $depth++;
+            } elseif ($char === '}') {
+                $depth--;
+                if ($depth === 0) {
+                    $end = $i;
+                    break;
+                }
+            }
+        }
+
+        $this->assertNotNull($end, $contents);
+        $decoded = json_decode(substr($contents, $start, $end - $start + 1), true);
+        $this->assertIsArray($decoded, $contents);
+
+        if (isset($decoded['context']) && is_array($decoded['context']) && isset($decoded['events'])) {
+            return $decoded;
+        }
+
+        return $decoded;
+    }
 }
