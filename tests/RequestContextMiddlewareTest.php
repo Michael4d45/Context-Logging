@@ -3,6 +3,7 @@
 namespace Michael4d45\ContextLogging\Tests;
 
 use Illuminate\Http\Request;
+use Illuminate\Routing\Route;
 use Michael4d45\ContextLogging\ContextStore;
 use Michael4d45\ContextLogging\Middleware\RequestContextMiddleware;
 use PHPUnit\Framework\Attributes\Test;
@@ -227,5 +228,66 @@ class RequestContextMiddlewareTest extends TestCase
         $middleware->handle($request, static fn () => new Response('ok'));
 
         $this->assertSame([], $contextStore->getEvents());
+    }
+
+    #[Test]
+    public function it_records_route_name_and_action_after_the_request_is_handled(): void
+    {
+        $contextStore = new ContextStore;
+        $middleware = new RequestContextMiddleware($contextStore);
+        $request = Request::create('https://example.test/admin', 'GET');
+        $request->setRouteResolver(static fn () => new Route(['GET'], 'admin', [
+            'as' => 'filament.admin.pages.account-resolution-outreach-import',
+            'controller' => 'App\\Admin\\Pages\\AccountResolutionOutreachImportPage',
+        ]));
+
+        $middleware->handle($request, static fn () => new Response('ok'));
+
+        $this->assertSame(
+            'filament.admin.pages.account-resolution-outreach-import',
+            $contextStore->getContext('route_name'),
+        );
+        $this->assertSame(
+            'App\\Admin\\Pages\\AccountResolutionOutreachImportPage',
+            $contextStore->getContext('action'),
+        );
+    }
+
+    #[Test]
+    public function it_prefers_the_livewire_component_as_the_code_path(): void
+    {
+        $contextStore = new ContextStore;
+        $middleware = new RequestContextMiddleware($contextStore);
+        $snapshot = json_encode([
+            'data' => [],
+            'memo' => [
+                'id' => 'component-123',
+                'name' => 'App\\Livewire\\EditOrder',
+            ],
+        ], JSON_THROW_ON_ERROR);
+        $request = Request::create(
+            'https://example.test/livewire/update',
+            'POST',
+            [
+                'components' => [[
+                    'snapshot' => $snapshot,
+                    'updates' => [],
+                    'calls' => [[
+                        'method' => 'save',
+                        'params' => [],
+                    ]],
+                ]],
+            ],
+        );
+        $request->headers->set('X-Livewire', '1');
+        $request->setRouteResolver(static fn () => new Route(['POST'], 'livewire/update', [
+            'as' => 'livewire.update',
+            'controller' => 'Livewire\\Mechanisms\\HandleRequests\\HandleRequests@handleUpdate',
+        ]));
+
+        $middleware->handle($request, static fn () => new Response('ok'));
+
+        $this->assertSame('livewire.update', $contextStore->getContext('route_name'));
+        $this->assertSame('App\\Livewire\\EditOrder@save', $contextStore->getContext('action'));
     }
 }

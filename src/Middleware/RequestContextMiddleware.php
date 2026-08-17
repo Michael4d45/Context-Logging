@@ -94,7 +94,48 @@ class RequestContextMiddleware
             $this->contextStore->addEvent('info', 'Incoming Request', $payload);
         }
 
-        return $next($request);
+        $response = $next($request);
+        $this->captureRouteContext($request);
+
+        return $response;
+    }
+
+    /**
+     * Record Laravel route name and handler after routing, so the explorer can
+     * show a clickable code path. Livewire/Filament update payloads replace a
+     * generic Livewire controller with the actual component method.
+     */
+    private function captureRouteContext(Request $request): void
+    {
+        $route = $request->route();
+        if ($route !== null) {
+            $name = $route->getName();
+            if (is_string($name) && $name !== '') {
+                $this->contextStore->addContext('route_name', $name);
+            }
+
+            $action = $route->getActionName();
+            if (is_string($action) && $action !== '') {
+                $this->contextStore->addContext('action', $action);
+            }
+        }
+
+        $livewire = $this->livewireActions($request);
+        $first = $livewire[0] ?? null;
+        if (! is_array($first)) {
+            return;
+        }
+
+        $component = is_string($first['component'] ?? null) ? $first['component'] : null;
+        if ($component === null || $component === '') {
+            return;
+        }
+
+        $method = is_string($first['method'] ?? null) ? $first['method'] : null;
+        $this->contextStore->addContext(
+            'action',
+            $method !== null && $method !== '' ? $component.'@'.$method : $component,
+        );
     }
 
     /**

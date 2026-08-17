@@ -275,9 +275,8 @@ class ContextStore
      */
     public function addEvent(string $level, string $message, array $context = []): void
     {
-        if (SpxLifecycle::isStarted()) {
-            $profileMarkerSequence = ++$this->profileMarkerSequence;
-            ProfilerEventMarker::point($profileMarkerSequence);
+        $profileMarkerSequence = $this->stampProfileMarker();
+        if ($profileMarkerSequence !== null) {
             $context['profile_marker_seq'] = $profileMarkerSequence;
         }
 
@@ -302,6 +301,21 @@ class ContextStore
         if (!$this->drainingPreLifecycle) {
             $this->drainPreLifecycleQueue();
         }
+    }
+
+    /**
+     * Record a userland call SPX/Xdebug can see, and return its 1-based sequence.
+     */
+    protected function stampProfileMarker(): ?int
+    {
+        if (! SpxLifecycle::isStarted()) {
+            return null;
+        }
+
+        $sequence = ++$this->profileMarkerSequence;
+        ProfilerEventMarker::point($sequence);
+
+        return $sequence;
     }
 
     /**
@@ -453,6 +467,10 @@ class ContextStore
             if (isset($httpCall['trace']) && is_array($httpCall['trace']) && $httpCall['trace'] !== []) {
                 $eventContext['trace'] = $httpCall['trace'];
             }
+
+            if (isset($httpCall['profile_marker_seq']) && is_int($httpCall['profile_marker_seq'])) {
+                $eventContext['profile_marker_seq'] = $httpCall['profile_marker_seq'];
+            }
             
             if ($timestamp !== null) {
                 $combinedEvents[] = [
@@ -502,6 +520,8 @@ class ContextStore
         }
 
         $id = (string) Str::uuid();
+        // Stamp before hooks/trace so the profiler sample matches request start.
+        $profileMarkerSequence = $this->stampProfileMarker();
 
         $normalizedRequest = array_merge($request, [
             'timestamp' => $request['timestamp'] ?? microtime(true),
@@ -518,6 +538,10 @@ class ContextStore
             'context' => [],
             'trace' => TraceHelper::getCollapsedTrace(),
         ];
+
+        if ($profileMarkerSequence !== null) {
+            $this->httpCalls[$id]['profile_marker_seq'] = $profileMarkerSequence;
+        }
 
         return $id;
     }

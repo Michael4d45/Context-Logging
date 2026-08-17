@@ -3,6 +3,7 @@
 namespace Michael4d45\ContextLogging\Tests;
 
 use Michael4d45\ContextLogging\ContextStore;
+use Michael4d45\ContextLogging\Profiling\SpxLifecycle;
 use PHPUnit\Framework\Attributes\Test;
 use Orchestra\Testbench\TestCase;
 
@@ -20,11 +21,19 @@ class ContextStoreTest extends TestCase
 
     protected function tearDown(): void
     {
+        $this->setSpxStarted(false);
+
         if ($this->logFile !== '' && is_file($this->logFile)) {
             unlink($this->logFile);
         }
 
         parent::tearDown();
+    }
+
+    protected function setSpxStarted(bool $started): void
+    {
+        $property = new \ReflectionProperty(SpxLifecycle::class, 'started');
+        $property->setValue(null, $started);
     }
 
     protected function configureSingleLogToTempFile(): void
@@ -267,9 +276,35 @@ class ContextStoreTest extends TestCase
         $this->assertSame('https://api.example.com/payments', $httpEvent['context']['request']['url']);
         $this->assertSame(202, $httpEvent['context']['response']['status']);
         $this->assertSame($id, $httpEvent['context']['http_call_id']);
+        $this->assertArrayNotHasKey('profile_marker_seq', $httpEvent['context']);
         $this->assertIsArray($httpEvent['context']['trace']);
         $this->assertNotEmpty($httpEvent['context']['trace']);
         $this->assertMatchesRegularExpression('/\.php(:\d+)?$/', $httpEvent['context']['trace'][0]);
+    }
+
+    #[Test]
+    public function it_stamps_profiler_markers_on_outbound_http_calls()
+    {
+        $this->setSpxStarted(true);
+        $this->contextStore->initialize();
+
+        $this->contextStore->addEvent('info', 'Incoming Request');
+        $id = $this->contextStore->beginHttpCall([
+            'method' => 'GET',
+            'url' => 'https://statamic.com/api',
+        ]);
+        $this->contextStore->completeHttpCall($id, [
+            'status' => 200,
+        ]);
+
+        $payload = $this->contextStore->getPayload();
+        $incoming = $payload['events'][0];
+        $http = $payload['events'][1];
+
+        $this->assertSame('Incoming Request', $incoming['message']);
+        $this->assertSame(1, $incoming['context']['profile_marker_seq']);
+        $this->assertSame('HTTP Call', $http['message']);
+        $this->assertSame(2, $http['context']['profile_marker_seq']);
     }
 
     #[Test]
