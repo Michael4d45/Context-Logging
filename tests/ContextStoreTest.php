@@ -165,6 +165,8 @@ class ContextStoreTest extends TestCase
         $payload = $this->contextStore->getPayload();
 
         $this->assertArrayHasKey('duration_ms', $payload['context']);
+        $this->assertArrayHasKey('started_at', $payload['context']);
+        $this->assertIsFloat($payload['context']['started_at']);
         $this->assertGreaterThan(0, $payload['context']['duration_ms']);
     }
 

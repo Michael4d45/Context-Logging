@@ -91,14 +91,132 @@ PHP;
 
         $this->wireRootAutoload($generatedDir);
         $patched = $this->patchVendorAutoloadFiles($generatedDir);
+        $sidecarClassCount = $this->patchSidecarClassmap();
 
         if ($patched) {
-            $this->write('context-logging: Guzzle Client patch installed.');
+            $this->write("context-logging: Guzzle Client patch installed ({$sidecarClassCount} sidecar classes registered).");
         } else {
             $this->write('context-logging: generated Client sources; vendor autoload remap skipped (run from app root).');
         }
 
         return true;
+    }
+
+    /**
+     * When this package is loaded as a sidecar (not a real Composer dependency of the target
+     * app — e.g. bind-mounted from an extra-packages directory), the target app's autoloader
+     * has no psr-4 mapping for our own namespace. The Generated\Client stub above references
+     * ClientPatch, which then fatals with "Class ... not found" the moment anything constructs
+     * a real GuzzleHttp\Client, unless every class this package needs is also present in the
+     * target app's classmap. Scan our own src/ tree and upsert one classmap entry per class,
+     * the same way the two Generated/*.php entries are already upserted above.
+     *
+     * @return int number of classes registered
+     */
+    protected function patchSidecarClassmap(): int
+    {
+        $vendorDir = $this->findVendorDir();
+        if ($vendorDir === null) {
+            return 0;
+        }
+
+        $classmapFile = $vendorDir.'/composer/autoload_classmap.php';
+        $staticFile = $vendorDir.'/composer/autoload_static.php';
+
+        if (! is_file($classmapFile)) {
+            return 0;
+        }
+
+        $classes = $this->scanPackageClassmap();
+
+        $classmapContents = file_get_contents($classmapFile);
+        $staticContents = is_file($staticFile) ? file_get_contents($staticFile) : false;
+
+        if ($classmapContents === false) {
+            return 0;
+        }
+
+        foreach ($classes as $fqcn => $absolutePath) {
+            $expr = $this->autoloadPathExpression($absolutePath, $vendorDir)
+                ?? var_export(realpath($absolutePath) ?: $absolutePath, true);
+            $classmapContents = $this->upsertClassmapEntry($classmapContents, $fqcn, $expr);
+
+            if ($staticContents !== false) {
+                $staticExpr = $this->autoloadStaticPathExpression($absolutePath, $vendorDir)
+                    ?? var_export(realpath($absolutePath) ?: $absolutePath, true);
+                $staticContents = $this->upsertStaticClassmapEntry($staticContents, $fqcn, $staticExpr);
+            }
+        }
+
+        file_put_contents($classmapFile, $classmapContents);
+        if ($staticContents !== false) {
+            file_put_contents($staticFile, $staticContents);
+        }
+
+        return count($classes);
+    }
+
+    /**
+     * Scan this package's own src/ tree (excluding Guzzle/Generated, which declares
+     * GuzzleHttp\Client/UnpatchedClient and is handled separately above) for every
+     * class/interface/trait/enum it declares.
+     *
+     * @return array<class-string, string> FQCN => absolute file path
+     */
+    protected function scanPackageClassmap(): array
+    {
+        $srcDir = dirname(__DIR__);
+        $excludedDir = $srcDir.'/Guzzle/Generated';
+        $entries = [];
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($srcDir, \FilesystemIterator::SKIP_DOTS)
+        );
+
+        foreach ($iterator as $file) {
+            if (! $file->isFile() || $file->getExtension() !== 'php') {
+                continue;
+            }
+
+            $path = $file->getPathname();
+            if (str_starts_with($path, $excludedDir.'/')) {
+                continue;
+            }
+
+            $fqcn = $this->extractFqcn($path);
+            if ($fqcn !== null) {
+                $entries[$fqcn] = $path;
+            }
+        }
+
+        return $entries;
+    }
+
+    /**
+     * Extract the fully-qualified class/interface/trait/enum name a single PHP file declares.
+     * Assumes one declared type per file (this package's own convention throughout).
+     */
+    protected function extractFqcn(string $path): ?string
+    {
+        $contents = file_get_contents($path);
+        if ($contents === false) {
+            return null;
+        }
+
+        if (! preg_match('/^\s*namespace\s+([^;]+);/m', $contents, $namespaceMatch)) {
+            return null;
+        }
+        $namespace = trim($namespaceMatch[1]);
+
+        if (! preg_match(
+            '/^\s*(?:abstract\s+|final\s+|readonly\s+)*(?:class|interface|trait|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/m',
+            $contents,
+            $classMatch
+        )) {
+            return null;
+        }
+
+        return $namespace.'\\'.$classMatch[1];
     }
 
     /**

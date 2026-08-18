@@ -156,6 +156,7 @@ class ContextStore
         $this->profileMarkerSequence = 0;
         $this->capturedExceptionFingerprints = [];
         $this->startTime = microtime(true);
+        $this->context['started_at'] = $this->startTime;
         $this->lifecycleStarted = true;
         $this->emitted = false;
         $this->emissionSuppressed = false;
